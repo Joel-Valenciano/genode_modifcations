@@ -1,0 +1,192 @@
+set on_hardware [expr ![have_include power_on/qemu]]
+
+create_boot_directory
+
+import_from_depot [depot_user]/src/[base_src] \
+                  [depot_user]/pkg/[drivers_interactive_pkg] \
+                  [depot_user]/pkg/[drivers_nic_pkg] \
+                  [depot_user]/src/init \
+                  [depot_user]/src/nic_router \
+				  [depot_user]/src/vfs \
+				  [depot_user]/src/vfs_pipe \
+				  [depot_user]/src/vfs_trace \
+				  [depot_user]/src/vfs_lxip \
+				  [depot_user]/src/vfs_jitterentropy \
+				  [depot_user]/src/ssh_terminal \
+				  [depot_user]/src/libc \
+				  [depot_user]/src/zlib \
+				  [depot_user]/src/libssh \
+				  [depot_user]/src/openssl \
+				  [depot_user]/src/posix \
+				  [depot_user]/src/stdcxx
+
+proc binary_name_gdbserver_platform_lib_so { } {
+	return "../app/gdb_monitor/gdbserver_platform.lib.so"
+}
+
+build {
+	server/log_report
+	app/nlog_lxip
+	app/gdb_monitor
+	drivers/rtc
+}
+
+append config {
+
+<config>
+
+	<parent-provides>
+		<service name="ROM"/>
+		<service name="IRQ"/>
+		<service name="IO_MEM"/>
+		<service name="IO_PORT"/>
+		<service name="PD"/>
+		<service name="RM"/>
+		<service name="CPU"/>
+		<service name="LOG"/>
+		<service name="TRACE"/>
+	</parent-provides>
+
+	<default-route>
+		<any-service> <parent/> <any-child/> </any-service>
+	</default-route>
+
+	<default caps="200"/>
+
+	<start name="timer">
+		<resource name="RAM" quantum="1M"/>
+		<provides><service name="Timer"/></provides>
+	</start>
+
+	<start name="report_rom">
+		<resource name="RAM" quantum="2M"/>
+		<provides>
+			<service name="Report"/>
+			<service name="ROM"/>
+		</provides>
+	</start>
+
+	<start name="drivers" caps="2000">
+		<resource name="RAM" quantum="200M"/>
+		<binary name="init"/>
+
+		<provides>
+			<service name="Platform"/>
+			<service name="Acpi"/>
+		</provides>
+		
+		<route>
+			<service name="ROM" label="config"> <parent label="drivers.config"/> </service>
+			<any-service> <parent/> <any-child/> </any-service>
+		</route>
+	</start>
+
+	<start name="rtc_drv">
+		<resource name="RAM" quantum="2M"/>
+		<provides>
+			<service name="Rtc"/>
+		</provides>
+	</start>
+
+	<start name="nic_router" caps="200">
+		<resource name="RAM" quantum="10M"/>
+		<provides>
+			<service name="Nic"/>
+			<service name="Uplink"/>
+		</provides>
+
+		<config verbose="true" verbose_packets="true" verbose_domain_state="true">
+			<policy label_prefix="drivers" domain="uplink"/>
+			<policy label_prefix="nlog_debug" domain="downlink"/>
+			<policy label_prefix="nlog_lxip" domain="downlink"/>
+			<policy label_prefix="ssh_terminal" domain="downlink"/>
+
+			<domain name="uplink">
+				<nat domain="downlink" icmp-ids="10000" udp-ports="10000" tcp-ports="10000"/>
+				<tcp-forward port="22" domain="downlink" to="10.0.3.20"/>
+			</domain>
+
+			<domain name="downlink" interface="10.0.3.1/24">
+				<dhcp-server dns_server_from="uplink"
+					ip_first="10.0.3.100" ip_last="10.0.3.200"/>
+
+				<tcp dst="0.0.0.0/0"> <permit-any domain="uplink"/> </tcp>
+				<udp dst="0.0.0.0/0"> <permit-any domain="uplink"/> </udp>
+				<icmp dst="0.0.0.0/0" domain="uplink"/>
+				
+			</domain>
+		</config>
+	</start> }
+
+append config {
+	<start name="ssh_terminal" caps="200">
+		<resource name="RAM" quantum="40M"/>
+		<provides> <service name="Terminal"/> </provides>
+		<config verbose="true" port="22" allow_password="yes" ed25519_key="/etc/ssh/ed25519_key">
+			<policy label_prefix="nlog_debug" user="genode" password="password"/>
+			<libc stdout="/dev/log" stderr="/dev/log" socket="/socket" pipe="/pipe"/>
+			<vfs>
+				<dir name="dev">
+					<jitterentropy name="random"/>
+					<jitterentropy name="urandom"/>
+					<rtc/>
+					<log/>
+				</dir>
+				<dir name="etc">
+					<dir name="ssh">
+						<rom name="ed25519_key"/>
+					</dir>
+				</dir>
+				<dir name="pipe"> <pipe/> </dir>
+				<dir name="socket"> <lxip ip_addr="10.0.3.20" netmask="255.255.255.0" gateway="10.0.3.1"/> </dir>
+			</vfs>
+		</config>
+	</start>
+
+	<start name="nlog_debug" caps="200">
+		<binary name="gdb_monitor"/>
+
+		<resource name="RAM" quantum="80M"/>
+		<config verbose="true" ld_verbose="true">
+			<preserve name="RAM" quantum="40M"/>
+			<target name="nlog_lxip" />
+			<arg value="nlog"/>
+			<libc stderr="/dev/log" stdout="/dev/log"/>
+			<vfs>
+				<dir name="dev">
+					<log/>
+					<!--><inline name="rtc">2021-01-01 00:01</inline><-->
+				</dir>
+				<!--><dir name="pipe">
+					<pipe/>
+				</dir><-->
+				<!--><dir name="socket">
+					<lxip dhcp="true" gateway="10.0.3.1"/>
+				</dir><-->
+			</vfs>
+		</config>
+	</start>
+
+</config> }
+
+set key_type "ed25519"
+set key ${key_type}_key
+
+if {![file exists bin/$key]} {
+	exec ssh-keygen -t $key_type -f bin/$key -q -N ""
+}
+
+install_config $config
+
+set boot_modules {
+	nlog_lxip gdb_monitor log_report rtc_drv
+	gdbserver_platform.lib.so
+}
+
+append boot_modules $key
+
+build_boot_image $boot_modules
+
+#append qemu_args " -nographic "
+#append_qemu_nic_args
+

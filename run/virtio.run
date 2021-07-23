@@ -1,0 +1,86 @@
+build {
+	drivers/virtio_gpu
+	drivers/platform
+	drivers/acpi
+	timer
+	server/report_rom
+}
+
+create_boot_directory
+
+install_config {
+	<config verbose="yes">
+		<parent-provides>
+			<service name="ROM"/>
+			<service name="LOG"/>
+			<service name="IO_MEM"/>
+			<service name="MEM"/>
+			<service name="RM"/>
+			<service name="PD"/>
+			<service name="CPU"/>
+		</parent-provides>
+		
+		<default-route>
+			<any-service> <parent/> <any-child/> </any-service>
+		</default-route>
+
+		<default caps="200" />
+
+		<start name="timer">
+			<resource name="RAM" quantum="10M"/>
+			<provides> <service name="Timer"/> </provides>
+		</start>
+
+
+		<start name="virtio-gpu">
+			<resource name="RAM" quantum="20M"/>
+		</start>
+
+		<start name="platform_drv">
+			<resource name="RAM" quantum="20M"/>
+			<provides>
+				<service name="Platform"/>
+			</provides>
+			<config>
+				<policy label_prefix="virtio-gpu">
+					<pci class="VGA"/>
+				</policy>
+			</config>
+			<route>
+				<service name="ROM" label_last="acpi"> <child name="report_rom"/> </service>
+				<any-service> <parent/> <any-child/> </any-service>
+			</route>
+		</start>
+
+		<start name="report_rom">
+			<resource name="RAM" quantum="20M"/>
+			<provides>
+				<service name="Report"/>
+				<service name="ROM"/>
+			</provides>
+			<config>
+				<policy label_prefix="platform_drv" report="acpi_drv -> acpi"/>
+			</config>
+		</start>
+
+
+		<start name="acpi_drv">
+			<resource name="RAM" quantum="20M"/>
+			<provides>
+				<service name="Acpi"/>
+			</provides>
+		</start>
+	</config>
+
+}
+
+#install_config $config
+
+append boot_modules {
+	core init timer ld.lib.so
+	platform_drv acpi_drv report_rom
+	virtio-gpu
+}
+
+build_boot_image $boot_modules
+#run_genode_until
