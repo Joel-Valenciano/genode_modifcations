@@ -1,0 +1,121 @@
+build {
+	timer
+	drivers/platform
+	drivers/framebuffer/boot
+	drivers/acpi
+	server/report_rom
+	app/window_layouter
+	app/sculpt_manager
+}
+
+create_boot_directory
+install_config {
+	<config>
+		<parent-provides>
+			<service name="LOG"/>
+			<service name="CPU"/>
+			<service name="PD"/>
+			<service name="RM"/>
+			<service name="ROM"/>
+			<service name="IO_MEM"/>
+			<service name="MEM"/>
+		</parent-provides>
+		<default-route>
+			<service name="ROM" label_last="acpi"> <child name="report_rom"/> </service>
+			<service name="ROM" label_last="window_list"> <child name="report_rom"/> </service>
+			<service name="ROM" label_last="hover"> <child name="report_rom"/> </service>
+			<service name="ROM" label_last="focus"> <child name="report_rom"/> </service>
+			<service name="Gui"> <child name="sculpt_manager"/> </service>
+			<any-service> <parent/> <any-child/> </any-service>
+		</default-route>
+		<default caps="100"/>
+		<start name="report_rom">
+			<resource name="RAM" quantum="10M"/>
+			<provides> <service name="ROM"/> <service name="Report"/> </provides>
+			<config>
+				<policy label="platform_drv -> acpi" report="acpi_drv -> acpi"/>
+				<policy label="window_layouter -> window_list" report="sculpt_manager -> window_list"/>
+				<policy label="window_layouter -> hover" report="nitpicker -> hover" />
+				<policy label="nitpicker -> focus" report="window_layouter -> focus" />
+			</config>
+		</start>
+		<start name="acpi_drv">
+			<resource name="RAM" quantum="10M"/>
+			<provides> <service name="Acpi"/> </provides>
+		</start>
+		<start name="platform_drv">
+			<resource name="RAM" quantum="10M"/>
+			<provides> <service name="Platform"/> </provides>
+			<config>
+				<policy label_prefix="boot_fb_drv">
+					<pci class="VGA"/>
+				</policy>
+			</config>
+		</start>
+		<start name="timer">
+			<resource name="RAM" quantum="10M"/>
+			<provides> <service name="Timer"/> </provides>
+		</start>
+		<start name="boot_fb_drv">
+			<resource name="RAM" quantum="10M"/>
+		</start>
+
+		<start name="nitpicker">
+			<resource name="RAM" quantum="10M"/>
+			<provides>
+				<service name="Capture"/>
+				<service name="Gui"/>
+				<service name="Event"/>
+			</provides>
+
+			<config focus="rom">
+				<report focus="yes" hover="yes" />
+			</config>
+		</start>
+
+		<start name="sculpt_manager">
+			<resource name="RAM" quantum="10M"/>
+			<provides>
+				<service name="Gui"/>
+			</provides>
+		</start>
+
+		<start name="wm">
+			<resource name="RAM" quantum="10M"/>
+			<provides> <service name="Gui" /> <service name="Gui" /> </provides>
+		</start>
+
+		<start name="window_layouter">
+			<resource name="RAM" quantum="10M"/>
+			<config>
+				<rules>
+					<screen>
+						<column width="400">
+							<row/>
+							<row/>
+							<row/>
+						</column>
+						<column>
+							<row/>
+						</column>
+					</screen>
+				</rules>
+			</config>
+		</start>
+	</config>
+}
+
+file copy -force [genode_dir]/VERSION [run_dir]/genode/
+
+append boot_modules {
+	core ld.lib.so init timer
+	platform_drv acpi_drv boot_fb_drv report_rom
+	nitpicker window_layouter sculpt_manager
+}
+
+append qemu_args { "-vga" "virtio" "-display" "gtk,gl=on" }
+#append qemu_args { "-device" "virtio-gpu-pci,virgl=on" "-display" "gtk,gl=on" }
+#append qemu_args { "-vga" "virtio" "-nographic" }
+build_boot_image $boot_modules
+run_genode_until
+

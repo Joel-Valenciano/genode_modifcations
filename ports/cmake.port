@@ -1,0 +1,9 @@
+LICENSE := BSD
+VERSION := 3.21.0
+DOWNLOADS := cmake.archive
+
+
+URL(cmake) := https://github.com/Kitware/CMake/releases/download/v$(VERSION)/cmake-$(VERSION).tar.gz
+DIR(cmake) := src/app/cmake
+SHA(cmake) := 4a42d56449a51f4d3809ab4d3b61fd4a96a469e56266e896ce1009b5768bd2ab
+
